@@ -1,5 +1,5 @@
-FROM centos:8
-RUN yum install -y git
+FROM quay.io/centos/centos:stream8
+RUN yum install -y git initscripts
 
 ENV GITDIR /etc/.pihole
 ENV SCRIPTDIR /opt/pihole
@@ -12,7 +12,7 @@ ENV PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$SCRIPTDIR
 RUN true && \
     chmod +x $SCRIPTDIR/*
 
-ENV PH_TEST true
+ENV SKIP_INSTALL true
 ENV OS_CHECK_DOMAIN_NAME dev-supportedos.pi-hole.net
 
 #sed '/# Start the installer/Q' /opt/pihole/basic-install.sh > /opt/pihole/stub_basic-install.sh && \
