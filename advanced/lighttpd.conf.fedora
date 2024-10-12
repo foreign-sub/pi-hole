@@ -7,13 +7,15 @@
 # This file is copyright under the latest version of the EUPL.
 # Please see LICENSE file for your rights under this license.
 
-###############################################################################
-#     FILE AUTOMATICALLY OVERWRITTEN BY PI-HOLE INSTALL/UPDATE PROCEDURE.     #
-# ANY CHANGES MADE TO THIS FILE AFTER INSTALL WILL BE LOST ON THE NEXT UPDATE #
-#                                                                             #
-#              CHANGES SHOULD BE MADE IN A SEPARATE CONFIG FILE:              #
-#                         /etc/lighttpd/external.conf                         #
-###############################################################################
+###################################################################################################
+#   IF THIS HEADER EXISTS, THE FILE WILL BE OVERWRITTEN BY PI-HOLE'S UPDATE PROCEDURE.            #
+#   ANY CHANGES MADE TO THIS FILE WILL BE LOST ON THE NEXT UPDATE UNLESS YOU REMOVE THIS HEADER   #
+#                                                                                                 #
+#   ENSURE THAT YOU DO NOT REMOVE THE REQUIRED LINE:                                              #
+#                                                                                                 #
+#   include "/etc/lighttpd/conf.d/pihole-admin.conf"                                              #
+#                                                                                                 #
+###################################################################################################
 
 server.modules = (
     "mod_access",
@@ -27,15 +29,19 @@ server.modules = (
 )
 
 server.document-root        = "/var/www/html"
-server.error-handler-404    = "/pihole/index.php"
 server.upload-dirs          = ( "/var/cache/lighttpd/uploads" )
-server.errorlog             = "/var/log/lighttpd/error.log"
+server.errorlog             = "/var/log/lighttpd/error-pihole.log"
 server.pid-file             = "/run/lighttpd.pid"
 server.username             = "lighttpd"
 server.groupname            = "lighttpd"
+# For lighttpd version 1.4.46 or above, the port can be overwritten in `/etc/lighttpd/external.conf` using the := operator
+# e.g. server.port := 8000
 server.port                 = 80
-accesslog.filename          = "/var/log/lighttpd/access.log"
-accesslog.format            = "%{%s}t|%V|%r|%s|%b"
+
+# Allow streaming response
+# reference: https://redmine.lighttpd.net/projects/lighttpd/wiki/Server_stream-response-bodyDetails
+server.stream-response-body = 1
+#ssl.read-ahead              = "disable"
 
 index-file.names            = ( "index.php", "index.html", "index.lighttpd.html" )
 url.access-deny             = ( "~", ".inc", ".md", ".yml", ".ini" )
@@ -61,9 +67,8 @@ mimetype.assign = (
     ".woff2" => "font/woff2"
 )
 
-# Add user chosen options held in external file
-# This uses include_shell instead of an include wildcard for compatibility
-include_shell "cat external.conf 2>/dev/null"
+# Add user chosen options held in (optional) external file
+include "external*.conf"
 
 # default listening port for IPv6 falls back to the IPv4 port
 #include_shell "/usr/share/lighttpd/use-ipv6.pl " + server.port
@@ -79,26 +84,4 @@ fastcgi.server = (
     )
 )
 
-# If the URL starts with /admin, it is the Web interface
-$HTTP["url"] =~ "^/admin/" {
-    # Create a response header for debugging using curl -I
-    setenv.add-response-header = (
-        "X-Pi-hole" => "The Pi-hole Web interface is working!",
-        "X-Frame-Options" => "DENY"
-    )
-}
-
-# Block . files from being served, such as .git, .github, .gitignore
-$HTTP["url"] =~ "^/admin/\.(.*)" {
-    url.access-deny = ("")
-}
-
-# allow teleporter and API qr code iframe on settings page
-$HTTP["url"] =~ "/(teleporter|api_token)\.php$" {
-    $HTTP["referer"] =~ "/admin/settings\.php" {
-        setenv.add-response-header = ( "X-Frame-Options" => "SAMEORIGIN" )
-    }
-}
-
-# Default expire header
-expire.url = ( "" => "access plus 0 seconds" )
+include "/etc/lighttpd/conf.d/pihole-admin.conf"

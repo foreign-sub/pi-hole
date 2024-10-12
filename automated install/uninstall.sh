@@ -11,10 +11,9 @@
 source "/opt/pihole/COL_TABLE"
 
 while true; do
-    read -rp "  ${QST} Are you sure you would like to remove ${COL_WHITE}Pi-hole${COL_NC}? [y/N] " yn
-    case ${yn} in
+    read -rp "  ${QST} Are you sure you would like to remove ${COL_WHITE}Pi-hole${COL_NC}? [y/N] " answer
+    case ${answer} in
         [Yy]* ) break;;
-        [Nn]* ) echo -e "${OVER}  ${COL_LIGHT_GREEN}Uninstall has been canceled${COL_NC}"; exit 0;;
         * ) echo -e "${OVER}  ${COL_LIGHT_GREEN}Uninstall has been canceled${COL_NC}"; exit 0;;
     esac
 done
@@ -37,7 +36,7 @@ else
 fi
 
 readonly PI_HOLE_FILES_DIR="/etc/.pihole"
-PH_TEST="true"
+SKIP_INSTALL="true"
 source "${PI_HOLE_FILES_DIR}/automated install/basic-install.sh"
 # setupVars set in basic-install.sh
 source "${setupVars}"
@@ -45,8 +44,8 @@ source "${setupVars}"
 # package_manager_detect() sourced from basic-install.sh
 package_manager_detect
 
-# Install packages used by the Pi-hole
-DEPS=("${INSTALLER_DEPS[@]}" "${PIHOLE_DEPS[@]}")
+# Uninstall packages used by the Pi-hole
+DEPS=("${INSTALLER_DEPS[@]}" "${PIHOLE_DEPS[@]}" "${OS_CHECK_DEPS[@]}")
 if [[ "${INSTALL_WEB_SERVER}" == true ]]; then
     # Install the Web dependencies
     DEPS+=("${PIHOLE_WEB_DEPS[@]}")
@@ -76,8 +75,8 @@ removeAndPurge() {
     for i in "${DEPS[@]}"; do
         if package_check "${i}" > /dev/null; then
             while true; do
-                read -rp "  ${QST} Do you wish to remove ${COL_WHITE}${i}${COL_NC} from your system? [Y/N] " yn
-                case ${yn} in
+                read -rp "  ${QST} Do you wish to remove ${COL_WHITE}${i}${COL_NC} from your system? [Y/N] " answer
+                case ${answer} in
                     [Yy]* )
                         echo -ne "  ${INFO} Removing ${i}...";
                         ${SUDO} "${PKG_REMOVE[@]}" "${i}" &> /dev/null;
@@ -132,12 +131,36 @@ removeNoPurge() {
     fi
 
     if package_check lighttpd > /dev/null; then
+        # Attempt to preserve backwards compatibility with older versions
         if [[ -f /etc/lighttpd/lighttpd.conf.orig ]]; then
             ${SUDO} mv /etc/lighttpd/lighttpd.conf.orig /etc/lighttpd/lighttpd.conf
         fi
 
         if [[ -f /etc/lighttpd/external.conf ]]; then
             ${SUDO} rm /etc/lighttpd/external.conf
+        fi
+
+        # Fedora-based
+        if [[ -f /etc/lighttpd/conf.d/pihole-admin.conf ]]; then
+            ${SUDO} rm /etc/lighttpd/conf.d/pihole-admin.conf
+            conf=/etc/lighttpd/lighttpd.conf
+            tconf=/tmp/lighttpd.conf.$$
+            if awk '!/^include "\/etc\/lighttpd\/conf\.d\/pihole-admin\.conf"$/{print}' \
+              $conf > $tconf && mv $tconf $conf; then
+                :
+            else
+                rm $tconf
+            fi
+            ${SUDO} chown root:root $conf
+            ${SUDO} chmod 644 $conf
+        fi
+
+        # Debian-based
+        if [[ -f /etc/lighttpd/conf-available/pihole-admin.conf ]]; then
+            if is_command lighty-disable-mod ; then
+                ${SUDO} lighty-disable-mod pihole-admin > /dev/null || true
+            fi
+            ${SUDO} rm /etc/lighttpd/conf-available/15-pihole-admin.conf
         fi
 
         echo -e "  ${TICK} Removed lighttpd configs"
@@ -147,6 +170,7 @@ removeNoPurge() {
     ${SUDO} rm -f /etc/dnsmasq.d/01-pihole.conf &> /dev/null
     ${SUDO} rm -f /etc/dnsmasq.d/06-rfc6761.conf &> /dev/null
     ${SUDO} rm -rf /var/log/*pihole* &> /dev/null
+    ${SUDO} rm -rf /var/log/pihole/*pihole* &> /dev/null
     ${SUDO} rm -rf /etc/pihole/ &> /dev/null
     ${SUDO} rm -rf /etc/.pihole/ &> /dev/null
     ${SUDO} rm -rf /opt/pihole/ &> /dev/null
@@ -168,6 +192,18 @@ removeNoPurge() {
             systemctl stop pihole-FTL
         else
             service pihole-FTL stop
+        fi
+        ${SUDO} rm -f /etc/systemd/system/pihole-FTL.service
+        if [[ -d '/etc/systemd/system/pihole-FTL.service.d' ]]; then
+            read -rp "  ${QST} FTL service override directory /etc/systemd/system/pihole-FTL.service.d detected. Do you wish to remove this from your system? [y/N] " answer
+            case $answer in
+                [yY]*)
+                    echo -ne "  ${INFO} Removing /etc/systemd/system/pihole-FTL.service.d..."
+                    ${SUDO} rm -R /etc/systemd/system/pihole-FTL.service.d
+                    echo -e "${OVER}  ${INFO} Removed /etc/systemd/system/pihole-FTL.service.d"
+                ;;
+                *) echo -e "  ${INFO} Leaving /etc/systemd/system/pihole-FTL.service.d in place.";;
+            esac
         fi
         ${SUDO} rm -f /etc/init.d/pihole-FTL
         ${SUDO} rm -f /usr/bin/pihole-FTL
@@ -215,8 +251,8 @@ while true; do
         echo -n "${i} "
     done
     echo "${COL_NC}"
-    read -rp "  ${QST} Do you wish to go through each dependency for removal? (Choosing No will leave all dependencies installed) [Y/n] " yn
-    case ${yn} in
+    read -rp "  ${QST} Do you wish to go through each dependency for removal? (Choosing No will leave all dependencies installed) [Y/n] " answer
+    case ${answer} in
         [Yy]* ) removeAndPurge; break;;
         [Nn]* ) removeNoPurge; break;;
         * ) removeAndPurge; break;;
