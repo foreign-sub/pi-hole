@@ -11,13 +11,13 @@
 # Please see LICENSE file for your rights under this license.
 
 # Variables
-readonly ADMIN_INTERFACE_GIT_URL="https://github.com/pi-hole/AdminLTE.git"
+readonly ADMIN_INTERFACE_GIT_URL="https://github.com/pi-hole/web.git"
 readonly ADMIN_INTERFACE_DIR="/var/www/html/admin"
 readonly PI_HOLE_GIT_URL="https://github.com/pi-hole/pi-hole.git"
 readonly PI_HOLE_FILES_DIR="/etc/.pihole"
 
 # shellcheck disable=SC2034
-PH_TEST=true
+SKIP_INSTALL=true
 
 # when --check-only is passed to this script, it will not perform the actual update
 CHECK_ONLY=false
@@ -35,41 +35,56 @@ source "/opt/pihole/COL_TABLE"
 
 GitCheckUpdateAvail() {
     local directory
+    local curBranch
     directory="${1}"
     curdir=$PWD
-    cd "${directory}" || return
+    cd "${directory}" || exit 1
 
     # Fetch latest changes in this repo
-    git fetch --quiet origin
+    if ! git fetch --quiet origin ; then
+        echo -e "\\n  ${COL_LIGHT_RED}Error: Unable to update local repository. Contact Pi-hole Support.${COL_NC}"
+        exit 1
+    fi
 
-    # @ alone is a shortcut for HEAD. Older versions of git
-    # need @{0}
-    LOCAL="$(git rev-parse "@{0}")"
+    # Check current branch. If it is master, then check for the latest available tag instead of latest commit.
+    curBranch=$(git rev-parse --abbrev-ref HEAD)
+    if [[ "${curBranch}" == "master" ]]; then
+        # get the latest local tag
+        LOCAL=$(git describe --abbrev=0 --tags master)
+        # get the latest tag from remote
+        REMOTE=$(git describe --abbrev=0 --tags origin/master)
 
-    # The suffix @{upstream} to a branchname
-    # (short form <branchname>@{u}) refers
-    # to the branch that the branch specified
-    # by branchname is set to build on top of#
-    # (configured with branch.<name>.remote and
-    # branch.<name>.merge). A missing branchname
-    # defaults to the current one.
-    REMOTE="$(git rev-parse "@{upstream}")"
+    else
+        # @ alone is a shortcut for HEAD. Older versions of git
+        # need @{0}
+        LOCAL="$(git rev-parse "@{0}")"
+
+        # The suffix @{upstream} to a branchname
+        # (short form <branchname>@{u}) refers
+        # to the branch that the branch specified
+        # by branchname is set to build on top of#
+        # (configured with branch.<name>.remote and
+        # branch.<name>.merge). A missing branchname
+        # defaults to the current one.
+        REMOTE="$(git rev-parse "@{upstream}")"
+    fi
+
 
     if [[ "${#LOCAL}" == 0 ]]; then
         echo -e "\\n  ${COL_LIGHT_RED}Error: Local revision could not be obtained, please contact Pi-hole Support"
         echo -e "  Additional debugging output:${COL_NC}"
         git status
-        exit
+        exit 1
     fi
     if [[ "${#REMOTE}" == 0 ]]; then
         echo -e "\\n  ${COL_LIGHT_RED}Error: Remote revision could not be obtained, please contact Pi-hole Support"
         echo -e "  Additional debugging output:${COL_NC}"
         git status
-        exit
+        exit 1
     fi
 
     # Change back to original directory
-    cd "${curdir}" || exit
+    cd "${curdir}" || exit 1
 
     if [[ "${LOCAL}" != "${REMOTE}" ]]; then
         # Local branch is behind remote branch -> Update
@@ -92,12 +107,13 @@ main() {
     web_update=false
     FTL_update=false
 
-    # shellcheck disable=1090,2154
-    source "${setupVars}"
+    # Perform an OS check to ensure we're on an appropriate operating system
+    os_check
 
     # Install packages used by this installation script (necessary if users have removed e.g. git from their systems)
     package_manager_detect
-    install_dependent_packages "${INSTALLER_DEPS[@]}"
+    build_dependency_package
+    install_dependent_packages
 
     # This is unlikely
     if ! is_repo "${PI_HOLE_FILES_DIR}" ; then
@@ -116,20 +132,18 @@ main() {
         echo -e "  ${INFO} Pi-hole Core:\\t${COL_LIGHT_GREEN}up to date${COL_NC}"
     fi
 
-    if [[ "${INSTALL_WEB_INTERFACE}" == true ]]; then
-        if ! is_repo "${ADMIN_INTERFACE_DIR}" ; then
-            echo -e "\\n  ${COL_LIGHT_RED}Error: Web Admin repo is missing from system!"
-            echo -e "  Please re-run install script from https://pi-hole.net${COL_NC}"
-            exit 1;
-        fi
+    if ! is_repo "${ADMIN_INTERFACE_DIR}" ; then
+        echo -e "\\n  ${COL_LIGHT_RED}Error: Web Admin repo is missing from system!"
+        echo -e "  Please re-run install script from https://pi-hole.net${COL_NC}"
+        exit 1;
+    fi
 
-        if GitCheckUpdateAvail "${ADMIN_INTERFACE_DIR}" ; then
-            web_update=true
-            echo -e "  ${INFO} Web Interface:\\t${COL_YELLOW}update available${COL_NC}"
-        else
-            web_update=false
-            echo -e "  ${INFO} Web Interface:\\t${COL_LIGHT_GREEN}up to date${COL_NC}"
-        fi
+    if GitCheckUpdateAvail "${ADMIN_INTERFACE_DIR}" ; then
+        web_update=true
+        echo -e "  ${INFO} Web Interface:\\t${COL_YELLOW}update available${COL_NC}"
+    else
+        web_update=false
+        echo -e "  ${INFO} Web Interface:\\t${COL_LIGHT_GREEN}up to date${COL_NC}"
     fi
 
     local funcOutput
@@ -137,7 +151,7 @@ main() {
     local binary
     binary="pihole-FTL${funcOutput##*pihole-FTL}" #binary name will be the last line of the output of get_binary_name (it always begins with pihole-FTL)
 
-    if FTLcheckUpdate "${binary}" > /dev/null; then
+    if FTLcheckUpdate "${binary}" &>/dev/null; then
         FTL_update=true
         echo -e "  ${INFO} FTL:\\t\\t${COL_YELLOW}update available${COL_NC}"
     else
@@ -148,8 +162,13 @@ main() {
             2)
                 echo -e "  ${INFO} FTL:\\t\\t${COL_LIGHT_RED}Branch is not available.${COL_NC}\\n\\t\\t\\tUse ${COL_LIGHT_GREEN}pihole checkout ftl [branchname]${COL_NC} to switch to a valid branch."
                 ;;
+            3)
+                echo -e "  ${INFO} FTL:\\t\\t${COL_LIGHT_RED}Something has gone wrong, cannot reach download server${COL_NC}"
+                exit 1
+                ;;
             *)
                 echo -e "  ${INFO} FTL:\\t\\t${COL_LIGHT_RED}Something has gone wrong, contact support${COL_NC}"
+                exit 1
         esac
         FTL_update=false
     fi
@@ -199,15 +218,20 @@ main() {
     fi
 
     if [[ "${FTL_update}" == true || "${core_update}" == true ]]; then
-        ${PI_HOLE_FILES_DIR}/automated\ install/basic-install.sh --reconfigure --unattended || \
+        ${PI_HOLE_FILES_DIR}/automated\ install/basic-install.sh --repair --unattended || \
             echo -e "${basicError}" && exit 1
     fi
 
     if [[ "${FTL_update}" == true || "${core_update}" == true || "${web_update}" == true ]]; then
-        # Force an update of the updatechecker
+        # Update local and remote versions via updatechecker
         /opt/pihole/updatecheck.sh
-        /opt/pihole/updatecheck.sh x remote
         echo -e "  ${INFO} Local version file information updated."
+    fi
+
+    # if there was only a web update, show the new versions
+    # (on core and FTL updates, this is done as part of the installer run)
+    if [[ "${web_update}" == true &&  "${FTL_update}" == false && "${core_update}" == false ]]; then
+        "${PI_HOLE_BIN_DIR}"/pihole version
     fi
 
     echo ""
