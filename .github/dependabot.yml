@@ -7,4 +7,12 @@ updates:
     day: saturday
     time: "10:00"
   open-pull-requests-limit: 10
-  target-branch: developement
+  target-branch: development
+- package-ecosystem: pip
+  directory: "/test"
+  schedule:
+    interval: weekly
+    day: saturday
+    time: "10:00"
+  open-pull-requests-limit: 10
+  target-branch: development
