@@ -1,25 +1,48 @@
 # Recommended way to run tests
 
-Make sure you have Docker and Python w/pip package manager.
+The test suite is implemented with BATS and runs inside distro-specific Docker containers.
 
-From command line all you need to do is:
+## Requirements
 
-- `pip install tox`
-- `tox`
+- Docker (with buildx support)
+- Bash shell
 
-Tox handles setting up a virtual environment for python dependencies, installing dependencies, building the docker images used by tests, and finally running tests.  It's an easy way to have travis-ci like build behavior locally.
+## Run tests
 
-## Alternative py.test method of running tests
+From the repository root, run:
 
-You're responsible for setting up your virtual env and dependencies in this situation.
-
-```
-py.test -vv -n auto -m "build_stage"
-py.test -vv -n auto -m "not build_stage"
+```bash
+bash test/run.sh --distro debian_12
 ```
 
-The build_stage tests have to run first to create the docker images, followed by the actual tests which utilize said images. Unless you're changing your dockerfiles you shouldn't have to run the build_stage every time - but it's a good idea to rebuild at least once a day in case the base Docker images or packages change.
+`test/run.sh` will:
 
-# How do I debug python?
+- Build the distro test image from `test/_<distro>.Dockerfile`
+- Run the mock/function BATS suite in a fresh container
+- Run the fresh-install BATS suite in a separate fresh container
 
-Highly recommended: Setup PyCharm on a **Docker enabled** machine. Having a python debugger like PyCharm changes your life if you've never used it :)
+## Available distros
+
+If you are unsure which distro names are valid, run:
+
+```bash
+bash test/run.sh --help
+```
+
+The help output includes the current list of supported distros.
+
+## Optional: override BATS library versions
+
+`test/run.sh` accepts optional environment variable overrides when building test images:
+
+- `BATS_CORE_VER`
+- `BATS_SUPPORT_VER`
+- `BATS_ASSERT_VER`
+- `BATS_MOCK_VER`
+- `BATS_FILE_VER`
+
+Example:
+
+```bash
+BATS_CORE_VER=v1.14.0 DISTRO=debian_12 bash test/run.sh
+```
